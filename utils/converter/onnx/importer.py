@@ -691,6 +691,24 @@ class OnnxImporter:
             raise ValueError(
                 "The shape of {} was not found".format(input_name))
         return input_shape
+    
+    def get_func_input_dtype(self, input_name):
+        dtype = None
+        if input_name in self._cast_node:
+            input_name = self._cast_node[input_name]
+        if input_name in self._shape_output:
+            dtype = TensorProto.FLOAT
+        else:
+            for i in self._graph.input:
+                if i.name == input_name:
+                    return i.type.tensor_type.elem_type
+            for i in self._graph.initializer:
+                if i.name == input_name:
+                    return i.data_type
+        if not dtype:
+            raise ValueError(
+                "The dtype of {} was not found".format(input_name))
+        return dtype
 
     def get_input_raw_data(self, input_name, data_type):
         data = []
@@ -698,7 +716,6 @@ class OnnxImporter:
         # Try to find data in constant node
         for op in self._graph.node:
             if op.output[0] == input_name and op.op_type == "Constant":
-                print('---------------------find\n')
                 for attr in op.attribute:
                     if attr.name == "value":
                         if attr.t.data_type == TensorProto.INT64:
@@ -3332,7 +3349,7 @@ class OnnxImporter:
 
         self._shape_output[n.output[0]] = input_shape
         func_list.append(func)
-
+        
     def DequantizeLinear(self, func_list, n):
         if len(n.input) not in [2, 3]:
             raise ValueError(
@@ -3488,8 +3505,6 @@ class OnnxImporter:
         input_len = len(n.input)
         sizes = n.input[3] if input_len == 4 else None
         scales = n.input[2] if input_len >= 3 else None
-        print('---------------------input_len\n',input_len)
-        print('---------------------scales\n',scales)
         # roi input is not suppoted
 
         # precheck
@@ -3514,8 +3529,7 @@ class OnnxImporter:
                     "sizes or scales should be prepared with initializer in importing Resize.")
         elif scales:
             try:
-                # scale_l = self.get_input_raw_data(scales, TensorProto.FLOAT)
-                scale_l = [1.0, 0.6, 0.6]
+                scale_l = self.get_input_raw_data(sizes, TensorProto.FLOAT)
             except ValueError:
                 raise ValueError(
                     "--sizes or scales should be prepared with initializer in importing Resize.")
@@ -3537,8 +3551,7 @@ class OnnxImporter:
             i_param.align_corners = False
             i_param.half_pixel = False
         i_param.mode = mode
-        print('------------------------------output_size\n',output_size)
-        i_param.output_size.extend(output_size)
+        i_param.output_size = output_size
 
         func_list.append(interpolate_f)
         self._shape_output[n.output[0]] = output_size
